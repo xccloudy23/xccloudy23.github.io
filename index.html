@@ -16,13 +16,13 @@ input{width:150px}
 .card{flex:1 1 100%;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:8px 14px}
 textarea{width:100%;height:90px;box-sizing:border-box;border-radius:8px;font:12px monospace;margin:6px 0}
 #labels{position:absolute;inset:0;overflow:hidden;pointer-events:none}.lb{position:absolute;left:0;top:0;display:none}.lb i{position:absolute;left:-2px;top:-2px;width:4px;height:4px;border-radius:50%;background:#fff;box-shadow:0 0 3px #000}.lb span{position:absolute;left:6px;top:-8px;font-size:11px;line-height:16px;color:#fff;white-space:nowrap;text-shadow:0 0 3px #000,0 0 3px #000,0 0 2px #000}
-#panel{display:none}.sm{color:var(--mut);font-size:12px}
+#zoom{left:auto;right:10px;top:42%;width:auto;flex-direction:column;gap:8px}#zoom button{width:46px;height:46px;font-size:24px;padding:0;line-height:1}.sm{color:var(--mut);font-size:12px}
 </style></head><body><div id="stage">
-<div id="labels"></div>
+<div id="labels"><div class="lb" id="isslbl"><i style="background:#ff4d6d;width:6px;height:6px;left:-3px;top:-3px"></i><span style="color:#ff9db0;font-weight:700;left:8px">ISS</span></div></div>
+<div class="ui" id="zoom"><button id="zin" aria-label="Zoom in">+</button><button id="zout" aria-label="Zoom out">−</button></div>
 <div class="ui" id="top"><span class="pill" id="clock">--</span><span class="pill" id="count">--</span>
-<button id="loc">My location</button><input id="q" placeholder="Satellite name or lat,lon"></div>
-<div class="ui" id="bot"><div class="card" id="panel"><div class="sm">Paste TLE data (name line plus two element lines per satellite).</div><textarea id="tle"></textarea><button id="go">Track these</button> <button id="demo">Demo</button></div>
-<div class="card"><b id="iname">Drag to rotate, pinch or scroll to zoom in for borders and cities, tap a dot for details.</b> <span id="idet"></span><div class="sm" id="status"></div><button id="data" style="margin-top:4px">Paste TLE data</button></div></div>
+<button id="iss">ISS</button><button id="sl">Starlink only</button><button id="loc">My location</button><input id="q" placeholder="Satellite name or lat,lon"></div>
+<div class="ui" id="bot"><div class="card"><b id="iname">Drag to rotate, pinch or scroll to zoom in for borders and cities, tap a dot for details.</b> <span id="idet"></span><div class="sm" id="status"></div></div></div>
 </div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
@@ -51,16 +51,17 @@ const sun=new THREE.DirectionalLight(0xffffff,1.05);scene.add(sun,new THREE.Ambi
  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(a,3));scene.add(new THREE.Points(g,new THREE.PointsMaterial({size:1.4,sizeAttenuation:false,color:0x9fb3d1})))}
 function dotTex(ring){const c=document.createElement('canvas');c.width=c.height=64;const g=c.getContext('2d');g.beginPath();g.arc(32,32,ring?26:30,0,7);
  if(ring){g.lineWidth=6;g.strokeStyle='#fff';g.stroke()}else{g.fillStyle='#fff';g.fill()}return new THREE.CanvasTexture(c)}
-const ctl=new THREE.OrbitControls(camera,renderer.domElement);ctl.enableDamping=true;ctl.enablePan=false;ctl.minDistance=1.02;ctl.maxDistance=16;
+const ctl=new THREE.OrbitControls(camera,renderer.domElement);ctl.enableDamping=true;ctl.enablePan=false;ctl.enableZoom=false;ctl.minDistance=1.02;ctl.maxDistance=16;
 const mark=new THREE.Mesh(new THREE.SphereGeometry(.006,16,12),new THREE.MeshBasicMaterial({color:0xff3b3b}));mark.visible=false;scene.add(mark);
 const selPt=new THREE.Points(new THREE.BufferGeometry().setAttribute('position',new THREE.BufferAttribute(new Float32Array(3),3)),new THREE.PointsMaterial({size:22,sizeAttenuation:false,map:dotTex(true),transparent:true,alphaTest:.3,color:0xffd54a,depthTest:false}));
 selPt.visible=false;selPt.frustumCulled=false;scene.add(selPt);
-let sats=[],pos,pts,geo,sel=null,line=null,simT=Date.now(),last=performance.now(),cur=0,fly=null,isLive=false,pathAt=0;
+const issPt=new THREE.Points(new THREE.BufferGeometry().setAttribute('position',new THREE.BufferAttribute(new Float32Array(3),3)),new THREE.PointsMaterial({size:13,sizeAttenuation:false,map:dotTex(false),transparent:true,alphaTest:.4,color:0xff4d6d}));issPt.visible=false;issPt.frustumCulled=false;scene.add(issPt);
+let issSat=null,nSL=0,only=false,zt=camera.position.length(),sats=[],pos,pts,geo,sel=null,line=null,simT=Date.now(),last=performance.now(),cur=0,fly=null,isLive=false,pathAt=0;
 const CH=800;
 function mk(name,alt,inc,raan,ph,color){const a=RE+alt,n=Math.sqrt(MU/a**3),i=inc*D2R,o=raan*D2R,u0=ph*D2R;
  return{name,color,period:2*Math.PI/n,vel:()=>Math.sqrt(MU/a),at(t){const u=u0+n*(t-T0)/1e3,cu=Math.cos(u),su=Math.sin(u),ci=Math.cos(i),co=Math.cos(o),so=Math.sin(o),
   x=a*(co*cu-so*ci*su),y=a*(so*cu+co*ci*su),z=a*Math.sin(i)*su,g=gm(t),cg=Math.cos(g),sg=Math.sin(g);return[(x*cg+y*sg)/RE,z/RE,(x*sg-y*cg)/RE]}}}
-function demoSats(){const s=[mk('ISS (demo orbit)',420,51.6,40,0,'#ff8a4c'),mk('Hubble (demo orbit)',540,28.5,120,90,'#ff8a4c'),mk('Tiangong (demo orbit)',390,41.5,200,200,'#ff8a4c')];
+function demoSats(){const s=[mk('ISS (demo orbit)',420,51.6,40,0,'#4c9aff'),mk('Hubble (demo orbit)',540,28.5,120,90,'#4c9aff'),mk('Tiangong (demo orbit)',390,41.5,200,200,'#4c9aff')];
  for(let p=0;p<12;p++)for(let k=0;k<6;k++)s.push(mk('Starlink-like '+(p*6+k+1),550,53,p*30,k*60+p*7,'#4c9aff'));
  for(let p=0;p<6;p++)for(let k=0;k<4;k++)s.push(mk('GPS-like '+(p*4+k+1),20200,55,p*60,k*90+p*15,'#3ccf8e'));
  for(let i=0;i<12;i++)s.push(mk('GEO-like '+(i+1),35786,.1,0,i*30,'#b57cff'));
@@ -69,16 +70,16 @@ function fromTLE(txt){const L=txt.split(/\r?\n/).map(s=>s.trim()).filter(Boolean
  for(let i=0;i<L.length-1&&out.length<20000;i++)if(L[i].startsWith('1 ')&&L[i+1].startsWith('2 ')){
   const nm=i>0&&!/^[12] /.test(L[i-1])?L[i-1]:'SAT '+(out.length+1);let rec;try{rec=satellite.twoline2satrec(L[i],L[i+1])}catch(e){continue}i++;
   if(!rec||!rec.no)continue;const a=Math.cbrt(MU/((rec.no/60)**2)),alt=a-RE;
-  const color=/^(ISS \(ZARYA\)|CSS \(TIANHE\)|HST)$/.test(nm)?'#ff8a4c':alt<2000?'#4c9aff':alt<30000?'#3ccf8e':(alt>34000&&alt<38000)?'#b57cff':'#26c6c6';
+  const color=alt<2000?'#4c9aff':alt<30000?'#3ccf8e':(alt>34000&&alt<38000)?'#b57cff':'#26c6c6';
   out.push({name:nm,color,period:2*Math.PI/rec.no*60,vel(t){const p=satellite.propagate(rec,new Date(t));return p.velocity?Math.hypot(p.velocity.x,p.velocity.y,p.velocity.z):0},
    at(t){const d=new Date(t),p=satellite.propagate(rec,d);if(!p||!p.position)return null;const e=satellite.eciToEcf(p.position,satellite.gstime(d));return[e.x/RE,e.z/RE,-e.y/RE]}})}
  return out}
-function setSats(s,msg){sats=s;if(pts){scene.remove(pts);geo.dispose()}pos=new Float32Array(s.length*3);const col=new Float32Array(s.length*3);
+function setSats(s,msg){sats=s;sats.forEach(x=>{x.sl=/^starlink/i.test(x.name)});issSat=sats.find(x=>/^ISS \((ZARYA|demo orbit)\)$/.test(x.name))||null;issPt.visible=!!issSat;nSL=sats.filter(x=>x.sl).length;if(pts){scene.remove(pts);geo.dispose()}pos=new Float32Array(s.length*3);const col=new Float32Array(s.length*3);
  s.forEach((x,i)=>{const c=new THREE.Color(x.color);col.set([c.r,c.g,c.b],i*3)});
  geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(pos,3));geo.setAttribute('color',new THREE.BufferAttribute(col,3));geo.boundingSphere=new THREE.Sphere(new THREE.Vector3(),60);
  pts=new THREE.Points(geo,new THREE.PointsMaterial({size:4,sizeAttenuation:false,vertexColors:true,map:dotTex(false),transparent:true,alphaTest:.4}));pts.frustumCulled=false;scene.add(pts);
  cur=0;pick0(null);for(let i=0;i<s.length;i+=CH)step(i,Math.min(s.length,i+CH));$('status').textContent=msg}
-function step(a,b){const t=simT;for(let i=a;i<b;i++){const p=sats[i].at(t);if(p)pos.set(p,i*3);else pos.set([0,0,0],i*3)}geo.attributes.position.needsUpdate=true}
+function step(a,b){const t=simT;for(let i=a;i<b;i++){if(only&&!sats[i].sl)continue;const p=sats[i].at(t);if(p)pos.set(p,i*3);else pos.set([0,0,0],i*3)}geo.attributes.position.needsUpdate=true}
 function sunDir(t){const d=t/864e5+2440587.5-2451545,L=(280.46+.9856474*d)*D2R,g=(357.528+.9856003*d)*D2R,lam=L+(1.915*Math.sin(g)+.02*Math.sin(2*g))*D2R,e=23.439*D2R,
  dec=Math.asin(Math.sin(e)*Math.sin(lam)),ra=Math.atan2(Math.cos(e)*Math.sin(lam),Math.cos(lam)),lo=ra-gm(t);return new THREE.Vector3(Math.cos(dec)*Math.cos(lo),Math.sin(dec),-Math.cos(dec)*Math.sin(lo))}
 function pick0(s){sel=s;if(line){scene.remove(line);line.geometry.dispose();line=null}selPt.visible=!!s;pathAt=0;
@@ -86,18 +87,18 @@ function pick0(s){sel=s;if(line){scene.remove(line);line.geometry.dispose();line
 function path(){if(line){scene.remove(line);line.geometry.dispose()}const N=160,a=new Float32Array(N*3);
  for(let k=0;k<N;k++)a.set(sel.at(simT+k/(N-1)*sel.period*1e3)||[0,0,0],k*3);const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(a,3));
  line=new THREE.Line(g,new THREE.LineBasicMaterial({color:0xffd54a,transparent:true,opacity:.7}));line.frustumCulled=false;scene.add(line)}
-function flyTo(v,dist){fly={a:camera.position.clone().normalize(),b:v.clone().normalize(),t0:performance.now(),d0:camera.position.length(),d1:dist}}
+function flyTo(v,dist){zt=dist;fly={a:camera.position.clone().normalize(),b:v.clone().normalize(),t0:performance.now(),d0:camera.position.length(),d1:dist}}
 function ll(lat,lon){const la=lat*D2R,lo=lon*D2R;return new THREE.Vector3(Math.cos(la)*Math.cos(lo),Math.sin(la),-Math.cos(la)*Math.sin(lo))}
 function goLoc(lat,lon){const v=ll(lat,lon);mark.position.copy(v.clone().multiplyScalar(1.002));mark.visible=true;flyTo(v,1.1)}
 $('loc').onclick=()=>{if(!navigator.geolocation){$('status').textContent='Location is unavailable here. Type lat,lon in the box instead.';return}
  navigator.geolocation.getCurrentPosition(p=>goLoc(p.coords.latitude,p.coords.longitude),()=>$('status').textContent='Location was blocked. Type lat,lon in the box instead, for example 41.6,-93.6.',{timeout:8000})};
 $('q').addEventListener('keydown',e=>{if(e.key!=='Enter')return;const v=e.target.value.trim(),m=v.match(/^(-?\d+(?:\.\d+)?)\s*,\s*(-?\d+(?:\.\d+)?)$/);
- if(m){goLoc(+m[1],+m[2]);return}const lv=v.toLowerCase(),s=sats.find(x=>x.name.toLowerCase().includes(lv));
+ if(m){goLoc(+m[1],+m[2]);return}const lv=v.toLowerCase(),s=sats.find(x=>x.name.toLowerCase().includes(lv)&&(!only||x.sl||x===issSat));
  if(s){pick0(s);const p=s.at(simT);if(p)flyTo(new THREE.Vector3(...p),Math.max(1.4,Math.hypot(...p)+.5))}else $('status').textContent='No satellite matches that name.'});
-$('data').onclick=()=>{const p=$('panel');p.style.display=p.style.display==='block'?'none':'block'};
-$('go').onclick=()=>{if(!window.satellite){$('status').textContent='The satellite library did not load.';return}const r=fromTLE($('tle').value);
- if(!r.length){$('status').textContent='No valid TLE sets found.';return}setSats(r,'Tracking '+r.length.toLocaleString()+' satellites from pasted data.')};
-$('demo').onclick=()=>setSats(demoSats(),'Demo mode: illustrative satellites, not real catalog positions.');
+$('zin').onclick=()=>{zt=Math.max(1.02,zt*.7)};$('zout').onclick=()=>{zt=Math.min(16,zt*1.4)};
+$('iss').onclick=()=>{if(!issSat){$('status').textContent='The ISS isn’t in the current data.';return}pick0(issSat);const p=issSat.at(simT);if(p)flyTo(new THREE.Vector3(...p),1.35)};
+$('sl').onclick=()=>{only=!only;$('sl').classList.toggle('on',only);if(only){for(let i=0;i<sats.length;i++)if(!sats[i].sl)pos.set([0,0,0],i*3);geo.attributes.position.needsUpdate=true;if(sel&&!sel.sl&&sel!==issSat)pick0(null)}else cur=0};
+function occ(p){const c=camera.position,dx=p.x-c.x,dy=p.y-c.y,dz=p.z-c.z,L=dx*dx+dy*dy+dz*dz;let k=-(c.x*dx+c.y*dy+c.z*dz)/L;k=Math.max(0,Math.min(1,k));const x=c.x+k*dx,y=c.y+k*dy,z=c.z+k*dz;return x*x+y*y+z*z<.995}
 const ray=new THREE.Raycaster(),el=renderer.domElement;let dn=null;
 el.addEventListener('pointerdown',e=>dn=[e.clientX,e.clientY]);
 el.addEventListener('pointerup',e=>{if(!dn||Math.hypot(e.clientX-dn[0],e.clientY-dn[1])>5)return;const r=el.getBoundingClientRect();
@@ -121,16 +122,18 @@ function frame(now){const dt=Math.min(now-last,100);last=now;simT=Date.now();
  if(sel){const p=sel.at(simT);if(p){selPt.geometry.attributes.position.set(p,0);selPt.geometry.attributes.position.needsUpdate=true;
   if(now-pathAt>3000){path();pathAt=now}
   if(now-uiAt>250){uiAt=now;const r=Math.hypot(...p);$('idet').textContent='Lat '+(Math.asin(p[1]/r)/D2R).toFixed(2)+'°, Lon '+(Math.atan2(-p[2],p[0])/D2R).toFixed(2)+'°, altitude '+Math.round(r*RE-RE).toLocaleString()+' km, speed '+sel.vel(simT).toFixed(2)+' km/s'}}}
+ if(issSat){const p=issSat.at(simT),e=$('isslbl');if(p){issPt.geometry.attributes.position.set(p,0);issPt.geometry.attributes.position.needsUpdate=true;tv.set(p[0],p[1],p[2]);
+  if(occ(tv))e.style.display='none';else{tv.project(camera);e.style.transform='translate('+(tv.x+1)/2*stage.clientWidth+'px,'+(1-tv.y)/2*stage.clientHeight+'px)';e.style.display='block'}}}
  if(fly){const k=Math.min(1,(now-fly.t0)/1400),e=k<.5?2*k*k:1-Math.pow(-2*k+2,2)/2;
-  camera.position.copy(fly.a.clone().lerp(fly.b,e).normalize().multiplyScalar(fly.d0+(fly.d1-fly.d0)*e));if(k>=1)fly=null}
+  camera.position.copy(fly.a.clone().lerp(fly.b,e).normalize().multiplyScalar(fly.d0+(fly.d1-fly.d0)*e));if(k>=1)fly=null}else{const d=camera.position.length();if(Math.abs(zt-d)>1e-4)camera.position.setLength(d+(zt-d)*.18)}
  ctl.rotateSpeed=Math.max(.06,Math.min(1,(camera.position.length()-1)*.6));ctl.update();renderer.render(scene,camera);labels();
- $('clock').textContent=new Date(simT).toISOString().replace('T',' ').slice(0,19)+' UTC';$('count').textContent=sats.length.toLocaleString()+' satellites';
+ $('clock').textContent=new Date(simT).toISOString().replace('T',' ').slice(0,19)+' UTC';$('count').textContent=(only?nSL:sats.length).toLocaleString()+(only?' Starlink':' satellites');
  requestAnimationFrame(frame)}
 async function live(first){try{if(!window.satellite)throw 0;let txt=null;
   try{const c=JSON.parse(localStorage.getItem('tle')||'null');if(c&&Date.now()-c.t<72e5)txt=c.x}catch(e){}
   if(!txt){const r=await fetch(TLE_URL);if(!r.ok)throw 0;txt=await r.text();try{localStorage.setItem('tle',JSON.stringify({t:Date.now(),x:txt}))}catch(e){}}
   const s=fromTLE(txt);if(!s.length)throw 0;isLive=true;setSats(s,'Live data from CelesTrak, refreshed every two hours.')}
- catch(e){if(first)$('status').textContent='Demo mode: this page can’t reach CelesTrak from where it is hosted. Open the downloaded copy, or paste TLE data below, for real satellites.'}}
+ catch(e){if(first)$('status').textContent='Demo mode: this page can’t reach CelesTrak from where it is hosted. Open your own hosted copy for real satellites.'}}
 setSats(demoSats(),'Loading live data…');requestAnimationFrame(frame);live(true);
 setInterval(()=>{if(isLive){try{localStorage.removeItem('tle')}catch(e){}live(false)}},72e5);
 </script></body></html>
